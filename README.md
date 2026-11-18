@@ -2,140 +2,132 @@
 
 ## What this app does
 
-This is a small Java 17 and Spring Boot web application for practising Git, GitHub, and deployment to an AWS EC2 server.
+This is a small Java 17 and Spring Boot web application for practising Git, GitHub, and deployment on an AWS EC2 virtual machine.
 
 - `/` returns a JSON greeting and the app status.
 - `/health` returns a JSON health status.
 - `APP_MESSAGE` changes the greeting. `PORT` changes the web server port (default: `8080`).
 
-This is a basic API, not a graphical website. When you open the home page in a browser, you will see plain JSON similar to:
+This is a basic API, not a graphical website. Opening the home page shows plain JSON similar to:
 
 ```json
 {"message":"Hello from Java on AWS EC2!","status":"running"}
 ```
 
-## Deployment flow
+## Deployment approach
 
-1. Make and save changes in VS Code.
-2. Commit and push the project to your GitHub repository.
-3. Connect to your Ubuntu EC2 instance and clone the repository.
-4. Build the app on EC2 and run it as a system service.
-5. After later changes, pull them on EC2, rebuild, and restart the service.
+All server commands in this guide are run inside the EC2 virtual machine using the AWS Console's **EC2 Instance Connect** browser terminal. You do not need to connect from your local computer using SSH or copy files from it.
 
-This guide uses manual deployment from EC2; it does not require GitHub Actions.
+GitHub Actions only checks that the project builds. It does not connect to EC2 or deploy the app. Deployment and later updates are run from the EC2 instance.
 
-## 1. Push the project from VS Code to GitHub
+## What you have already done
 
-Create a GitHub repository. In VS Code, open this project folder, then use **Source Control** to stage the files, enter a commit message, commit, and select **Publish Branch** or **Push**.
+You said Java, Maven, and the EC2 security-group port are already set up. The examples below use port `8080`. Make sure the port allowed in the EC2 security group is the same as the app's `PORT` value.
 
-You can also run these commands in the VS Code terminal. Replace the URL with your repository URL:
+## 1. Open a terminal on EC2
 
-```powershell
-git add .
-git commit -m "Add Java demo app"
-git branch -M main
-git remote add origin https://github.com/YOUR_GITHUB_USERNAME/YOUR_REPOSITORY.git
-git push -u origin main
-```
+In the AWS Console, go to **EC2 → Instances**, select your instance, and choose **Connect → EC2 Instance Connect → Connect**. Run the following commands in that browser terminal.
 
-If `origin` is already configured, skip the `git remote add origin` command. For a private repository, configure SSH authentication on EC2 before cloning; do not put a GitHub password or token directly in the clone URL.
+If you cannot connect with EC2 Instance Connect, check the AWS Console's connection requirements for your instance and region, or use AWS Systems Manager Session Manager if it is configured. Do not use a local SSH/SCP command for this procedure.
 
-## 2. Create and configure an Ubuntu EC2 instance
+## 2. Install Git and clone the GitHub repository
 
-Launch an Ubuntu 22.04 or 24.04 EC2 instance. In its Security Group, add these inbound rules:
-
-| Type | Port | Source |
-| --- | ---: | --- |
-| SSH | 22 | Your IP address only |
-| Custom TCP | 8080 | `0.0.0.0/0` for this demo |
-
-Port 8080 makes the demo reachable over HTTP. For a production website, use a domain, HTTPS, and a reverse proxy instead.
-
-Connect from your computer, replacing the key path and public IP:
+Java and Maven are already installed. Check them and install Git if needed:
 
 ```bash
-ssh -i /path/to/your-key.pem ubuntu@EC2_PUBLIC_IP
-```
-
-## 3. Install tools and clone the repository on EC2
-
-Run these commands in the EC2 terminal:
-
-```bash
-sudo apt update
-sudo apt install -y git openjdk-17-jdk maven
 java -version
 mvn -version
+sudo apt update
+sudo apt install -y git
 ```
 
-Clone your repository. Replace the URL with the HTTPS URL for a public repository, or use your configured SSH URL for a private repository:
+Clone your repository. Replace the URL with your repository's HTTPS URL:
 
 ```bash
 cd /home/ubuntu
 git clone https://github.com/YOUR_GITHUB_USERNAME/YOUR_REPOSITORY.git java-devops-demo
-cd java-devops-demo
+cd /home/ubuntu/java-devops-demo
 ```
 
-Build the runnable JAR:
+If the repository is private, GitHub will require authentication. Use HTTPS and a GitHub Personal Access Token when Git prompts for credentials; never put the token in the URL or commit it to the repository. A public repository can be cloned without credentials.
+
+If you have already cloned the repository, do not clone it again; open the existing folder instead:
+
+```bash
+cd /home/ubuntu/java-devops-demo
+```
+
+## 3. Build the application on EC2
+
+From the project directory, run:
 
 ```bash
 mvn clean package
 ```
 
-## 4. Run the app as a service
+This creates `target/java-devops-demo.jar`.
 
-Create a systemd service so the app keeps running after you disconnect from SSH and starts again if the server reboots:
+## 4. Start the app as a service
+
+The project includes a systemd service file configured for the default Ubuntu user, project folder, and port `8080`. Install and start it from the project directory:
 
 ```bash
-sudo tee /etc/systemd/system/java-devops-demo.service > /dev/null <<'EOF'
-[Unit]
-Description=Java DevOps Demo
-After=network.target
-
-[Service]
-User=ubuntu
-WorkingDirectory=/home/ubuntu/java-devops-demo
-Environment=PORT=8080
-Environment=APP_MESSAGE=Hello from my EC2 server!
-ExecStart=/usr/bin/java -jar /home/ubuntu/java-devops-demo/target/java-devops-demo.jar
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
+sudo cp deploy/java-demo.service /etc/systemd/system/java-devops-demo.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now java-devops-demo
 ```
 
-Check that it is running:
+Check the service and its health endpoint:
 
 ```bash
 sudo systemctl status java-devops-demo
 curl http://localhost:8080/health
 ```
 
-Open this address in your browser, replacing the IP with your EC2 public IPv4 address:
+In a browser, open `http://EC2_PUBLIC_IP:8080/`, replacing `EC2_PUBLIC_IP` with the instance's public IPv4 address. The security group must allow inbound traffic on port `8080`.
 
-```text
-http://EC2_PUBLIC_IP:8080/
+If you selected a different port, update the `PORT` setting in `deploy/java-demo.service` and allow that same port in the EC2 security group. Then reload systemd and restart the service:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart java-devops-demo
 ```
 
-## 5. Deploy later changes
+## 5. Make and deploy changes from EC2
 
-After you commit and push changes from VS Code, connect to EC2 and run:
+You can edit files directly on EC2 with a terminal editor such as `nano`. For example:
 
 ```bash
 cd /home/ubuntu/java-devops-demo
-git pull
+nano src/main/resources/application.properties
+```
+
+After changing the code, rebuild and restart the app:
+
+```bash
 mvn clean package
 sudo systemctl restart java-devops-demo
 sudo systemctl status java-devops-demo
 ```
 
-To see application logs if something goes wrong:
+If you also want to save changes back to GitHub from EC2, configure Git with your name and email, then commit and push over HTTPS:
+
+```bash
+git config --global user.name "Your Name"
+git config --global user.email "YOUR_EMAIL"
+git add .
+git commit -m "Update Java demo app"
+git push
+```
+
+When Git prompts for GitHub credentials, use your GitHub username and a Personal Access Token with repository write access. Do not store the token in project files or in the Git remote URL.
+
+## Troubleshooting
+
+View the application logs:
 
 ```bash
 sudo journalctl -u java-devops-demo -n 100 --no-pager
 ```
+
+Check that the application port, systemd `PORT` setting, and EC2 security-group inbound port all match.
