@@ -22,6 +22,6 @@ public class HomeController {
 
     @GetMapping("/health")
     public Map<String, String> health() {
-        return Map.of("status", "UP");
+        return Map.of("status", "running");
     }
 }
