@@ -1,0 +1,15 @@
+[Unit]
+Description=Java DevOps Demo Web Application
+After=network.target
+
+[Service]
+User=java-demo
+Group=java-demo
+WorkingDirectory=/opt/java-demo
+EnvironmentFile=-/etc/default/java-demo
+ExecStart=/usr/bin/java -jar /opt/java-demo/java-devops-demo.jar
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
