@@ -1,4 +1,4 @@
-name: Build Java app
+name: Build and Deploy Java app to EC2
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -24,4 +24,26 @@ jobs:
           cache: maven
 
       - name: Build application
-        run: mvn --batch-mode clean package
+        run: mvn --batch-mode clean package -DskipTests
+
+      # 1. Nayi bani .jar file ko EC2 par copy karega
+      - name: Copy JAR file to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "target/*.jar"
+          target: "/home/${{ secrets.EC2_USERNAME }}/app"
+          strip_components: 1
+
+      # 2. EC2 mein login karke purana app band karega aur naya chalayega
+      - name: Restart Java App on EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            pkill -f 'java -jar' || true
+            nohup java -jar /home/${{ secrets.EC2_USERNAME }}/app/*.jar > /home/${{ secrets.EC2_USERNAME }}/app/app.log 2>&1 &
